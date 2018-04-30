@@ -1,69 +1,127 @@
 package courier
 
 import (
-	"fmt"
 	"log"
+	"strconv"
+	"strings"
 
+	"github.com/courier_journey/haversine"
 	"github.com/courier_journey/utils"
-	"github.com/kr/pretty"
-	"golang.org/x/net/context"
-	"googlemaps.github.io/maps"
+)
+
+const (
+	unit = 1.0
 )
 
 // OptimizeRoute get the all coordinates(Lattitude and langitude)
-// we are using external google direction api(https://github.com/googlemaps/google-maps-services-go)
-// googlemaps api will accept only 23 waypoints including source and destination
-// hence we are splitting the the routes according to limits
-// for every request we get the optimized route for 23 points
-// map all the routes with source and destination as the key
-// TODO: merge all the splitted routes and make single optimized route.
+// calculating the flight path distance (0, len(points)-1) using the haversine formula gives great-circle distances between two points
+// on a sphere from their longitudes and latitudes
+// next ignoring the erraneous index
 func OptimizeRoute() {
+
 	points := utils.ReadCSV()
-	i := 0
-	routeMap := make(map[string][]maps.Route)
 
-	// here we are splitting the total points multiple chunks
-	// each chunk will have 23 waypoints including source and destination
-	for i < len(points) {
-		source := points[i]
-		var destination string
-		var waypoints []string
-
-		if i+22 < len(points) {
-			destination = points[i+22]
-			waypoints = points[i+1 : i+21]
-		} else {
-			destination = points[len(points)-1]
-			waypoints = points[i+1:]
+	finalPoints := removeDuplicate(points)
+	p, q := getCoordinates(finalPoints, 0, len(finalPoints)-1)
+	_, flightPathDistance := haversine.Distance(p, q)
+	log.Println(flightPathDistance, "Kilometer")
+	var errnoeusindex []int
+	errnoeusindex = getRoute(finalPoints, flightPathDistance)
+	if len(errnoeusindex) == 0 {
+		err := utils.WriteCSV(finalPoints)
+		if err != nil {
+			log.Println(err)
+			return
 		}
-		i = i + 22
-
-		route := getRoute(source, destination, waypoints)
-		routeMap[fmt.Sprintf("%s,%s", source, destination)] = route
-		pretty.Println(routeMap)
+		log.Println("No Erroneus coordinates found")
+		return
 	}
+	optimizedData := make([]string, 0)
+	var j, k = 0, 0
+	for i := 0; i < len(finalPoints); i++ {
+		if i == errnoeusindex[j] && j != len(errnoeusindex)-1 {
+			j++
+		} else {
+			optimizedData = append(optimizedData, finalPoints[i])
+			k++
+		}
+	}
+	err := utils.WriteCSV(finalPoints)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println("Optiizedpoints.csv contains the optimized points")
+	return
 
 }
 
-// it accepts the source, destination and waypoints, returs the optimised route
-func getRoute(source, destination string, waypoints []string) []maps.Route {
+// it accepts the points and flightPathDistance and returns the errnoeus index
+func getRoute(points []string, flightPathDistance float64) (errnoeusindex []int) {
+	i := 0
+	errnoeusindex = make([]int, 0)
+	// Recursive logic  needs to be implemented
+	for {
+		if i >= len(points)-2 {
+			break
+		}
+		p, q := getCoordinates(points, i, i+1)
+		_, distance1 := haversine.Distance(p, q)
+		p, q = getCoordinates(points, i+1, i+2)
+		_, distance2 := haversine.Distance(p, q)
+		if distance1+distance2 >= (0.5 * flightPathDistance) {
+			errnoeusindex = append(errnoeusindex, i+1)
+		}
+		i++
 
-	c, err := maps.NewClient(maps.WithAPIKey("AIzaSyBePdA4iCPtU6h13Ea-eXGh2Nm7zu3BesQ"))
+	}
+	return
+}
+
+//removeDuplicate will remove the duplicated values from the list of points
+func removeDuplicate(points []string) []string {
+	var finalPoints []string
+	flag := false
+	for i := 0; i < len(points); i++ {
+		if i != 0 {
+			for j := 0; j < len(finalPoints); j++ {
+
+				if finalPoints[j] == points[i] {
+					flag = false
+					break
+				} else {
+					flag = true
+				}
+			}
+
+		} else {
+			finalPoints = append(finalPoints, points[i])
+		}
+		if flag {
+			finalPoints = append(finalPoints, points[i])
+		}
+	}
+	return finalPoints
+}
+
+func getCoordinates(points []string, i, j int) (p, q haversine.Coord) {
+	points1 := strings.Split(points[i], ",")
+	points2 := strings.Split(points[j], ",")
+	p = haversine.Coord{
+		Lat: parse(points1[0]),
+		Lon: parse(points1[1]),
+	}
+	q = haversine.Coord{
+		Lat: parse(points2[0]),
+		Lon: parse(points2[1]),
+	}
+	return
+}
+
+func parse(s string) float64 {
+	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		log.Fatalf("fatal error: %s", err)
+		log.Fatalf("failed to parse", err)
 	}
-
-	r := &maps.DirectionsRequest{
-		Origin:      source,
-		Destination: destination,
-		Waypoints:   waypoints,
-		Optimize:    true,
-	}
-
-	route, ponts, err := c.Directions(context.Background(), r)
-	if err != nil {
-		log.Fatalf("fatal error: %s", err)
-	}
-	pretty.Println(ponts)
-	return route
+	return f
 }

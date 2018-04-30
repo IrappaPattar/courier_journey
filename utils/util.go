@@ -3,10 +3,12 @@ package utils
 import (
 	"bufio"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"strings"
 )
 
 // Coordinates represents the lattitude , langitude and timestamp
@@ -41,4 +43,25 @@ func ReadCSV() (waypoints []string) {
 	}
 	return
 
+}
+
+func WriteCSV(coOrdinates []string) (err error) {
+	file, err := os.Create("OptimizedPoints.csv")
+	if err != nil {
+		err = errors.New("Failed to create file")
+		return
+	}
+	defer file.Close()
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+	for i := 0; i < len(coOrdinates); i++ {
+		points := strings.Split(coOrdinates[i], ",")
+		line := []string{fmt.Sprintf("%s", points[0]), fmt.Sprintf("%s", points[1])}
+		err = writer.Write(line)
+		if err != nil {
+			err = errors.New("Failed to write to file")
+			return
+		}
+	}
+	return
 }
